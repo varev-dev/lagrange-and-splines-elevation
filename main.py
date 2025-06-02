@@ -131,14 +131,10 @@ class ElevationProfileInterpolator:
         return distance[indices], elevation[indices]
 
     def calculate_errors(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-        mae = np.mean(np.abs(y_true - y_pred))
         rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
-        max_error = np.max(np.abs(y_true - y_pred))
 
         return {
-            'MAE': mae,
             'RMSE': rmse,
-            'Max_Error': max_error
         }
 
     def analyze_route(self, route_name: str, node_counts: List[int], methods: List[str] = ['uniform']) -> Dict:
@@ -177,7 +173,7 @@ class ElevationProfileInterpolator:
                 except Exception as e:
                     print(f"Błąd interpolacji Lagrange dla {n_nodes} węzłów: {e}")
                     y_lagrange = np.full_like(x_dense, np.nan)
-                    errors_lagrange = {'MAE': np.inf, 'RMSE': np.inf, 'Max_Error': np.inf}
+                    errors_lagrange = {'RMSE': np.inf}
                     lagrange_success = False
 
                 try:
@@ -188,7 +184,7 @@ class ElevationProfileInterpolator:
                 except Exception as e:
                     print(f"Błąd interpolacji spline dla {n_nodes} węzłów: {e}")
                     y_spline = np.full_like(x_dense, np.nan)
-                    errors_spline = {'MAE': np.inf, 'RMSE': np.inf, 'Max_Error': np.inf}
+                    errors_spline = {'RMSE': np.inf}
                     spline_success = False
 
                 results['analyses'][method][n_nodes] = {
@@ -206,45 +202,65 @@ class ElevationProfileInterpolator:
         self.results[route_name] = results
         return results
 
-    def plot_interpolation_comparison(self, route_name: str, n_nodes: int, method: str = 'uniform', save_fig: bool = False):
+    def plot_interpolation_all_methods_comparison(self, route_name: str, node_counts: List[int], i_methods: [] = ['lagrange', 'spline'], save_dir: str = None):
         if route_name not in self.results:
             print(f"Brak wyników dla trasy: {route_name}")
             return
 
         data = self.data[route_name]
-        results = self.results[route_name]['analyses'][method][n_nodes]
+        available_methods = self.results[route_name]['analyses'].keys()
 
-        plt.figure(figsize=(12, 8))
+        # Zakres Y oparty na danych oryginalnych z lekkim marginesem
+        y_min = data['elevation'].min()
+        y_max = data['elevation'].max()
+        y_range = y_max - y_min
+        y_margin = y_range * 0.2  # 10% margines
+        y_lower = y_min - y_margin
+        y_upper = y_max + y_margin
 
-        plt.plot(data['distance'], data['elevation'], 'k-', linewidth=0.8,
-                 label=f'Dane oryginalne ({len(data["distance"])} punktów)', alpha=0.7)
+        for interp_method in i_methods:
+            fig, axs = plt.subplots(2, 2, figsize=(16, 10))
+            axs = axs.flatten()
 
-        plt.plot(results['x_nodes'], results['y_nodes'], 'ro', markersize=8,
-                 label=f'Węzły interpolacji ({n_nodes} punktów)')
+            for idx, n_nodes in enumerate(node_counts):
+                ax = axs[idx]
+                ax.plot(data['distance'], data['elevation'], 'k-', label='Oryginalny profil', linewidth=1)
 
-        if results['lagrange_success']:
-            plt.plot(results['x_dense'], results['y_lagrange'], 'b--', linewidth=2,
-                     label=f'Lagrange (RMSE: {results["errors_lagrange"]["RMSE"]:.2f}m)')
+                for method in available_methods:
+                    analyses = self.results[route_name]['analyses'][method]
+                    if n_nodes not in analyses:
+                        continue
 
-        if results['spline_success']:
-            plt.plot(results['x_dense'], results['y_spline'], 'g-', linewidth=2,
-                     label=f'Funkcje sklejane (RMSE: {results["errors_spline"]["RMSE"]:.2f}m)')
+                    result = analyses[n_nodes]
+                    
+                    if interp_method == 'lagrange' and result['lagrange_success']:
+                        ax.plot(result['x_dense'], result['y_lagrange'], label=f'{method} (Lagrange)', linewidth=1.5)
+                    elif interp_method == 'spline' and result['spline_success']:
+                        ax.plot(result['x_dense'], result['y_spline'], label=f'{method} (Spline)', linewidth=1.5)
 
-        plt.xlabel('Dystans [m]')
-        plt.ylabel('Wysokość [m n.p.m.]')
-        plt.title(f'Interpolacja profilu wysokościowego - {route_name}\n'
-                  f'Metoda wyboru węzłów: {method}, Liczba węzłów: {n_nodes}')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
+                    ax.plot(result['x_nodes'], result['y_nodes'], 'o', label=f'{method} węzły', markersize=8)
 
-        if save_fig:
-            plt.savefig(f'interpolation_{route_name}_{method}_{n_nodes}nodes.png', dpi=300, bbox_inches='tight')
+                ax.set_title(f'{n_nodes} węzłów')
+                ax.set_xlabel("Dystans [m]")
+                ax.set_ylabel("Wysokość [m]")
+                ax.grid(True)
+                ax.legend(fontsize=7)
+                ax.set_ylim(y_lower, y_upper)  # <<<<<< OGRANICZENIE Y
 
-        plt.show()
+            for i in range(len(node_counts), 4):
+                axs[i].axis("off")
 
-    def plot_error_analysis(self, route_name: str, methods: List[str] = ['uniform'],
-                            save_fig: bool = False):
+            fig.suptitle(f'Porównanie interpolacji ({interp_method.capitalize()}) – {route_name}', fontsize=16)
+            fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
+                filename = f"{route_name}_{interp_method}_multi_method_comparison.png"
+                fig.savefig(os.path.join(save_dir, filename), dpi=300)
+                plt.close()
+
+            
+    def plot_error_analysis(self, route_name: str, methods: List[str] = ['uniform'], save_fig: bool = False):
         if route_name not in self.results:
             print(f"Brak wyników dla trasy: {route_name}")
             return
@@ -260,22 +276,13 @@ class ElevationProfileInterpolator:
 
             rmse_lagrange = []
             rmse_spline = []
-            mae_lagrange = []
-            mae_spline = []
-            max_error_lagrange = []
-            max_error_spline = []
 
             for n_nodes in node_counts:
                 result = analyses[n_nodes]
                 rmse_lagrange.append(result['errors_lagrange']['RMSE'])
                 rmse_spline.append(result['errors_spline']['RMSE'])
-                mae_lagrange.append(result['errors_lagrange']['MAE'])
-                mae_spline.append(result['errors_spline']['MAE'])
-                max_error_lagrange.append(result['errors_lagrange']['Max_Error'])
-                max_error_spline.append(result['errors_spline']['Max_Error'])
 
             # RMSE
-            plt.subplot(1, 3, 1)
             plt.plot(node_counts, rmse_lagrange, 'b-o', label=f'Lagrange ({method})')
             plt.plot(node_counts, rmse_spline, 'g-s', label=f'Spline ({method})')
             plt.xlabel('Liczba węzłów')
@@ -285,35 +292,12 @@ class ElevationProfileInterpolator:
             plt.grid(True, alpha=0.3)
             plt.legend()
 
-            # MAE
-            plt.subplot(1, 3, 2)
-            plt.plot(node_counts, mae_lagrange, 'b-o', label=f'Lagrange ({method})')
-            plt.plot(node_counts, mae_spline, 'g-s', label=f'Spline ({method})')
-            plt.xlabel('Liczba węzłów')
-            plt.ylabel('MAE [m]')
-            plt.title('Mean Absolute Error')
-            plt.yscale('log')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-
-            # Max Error
-            plt.subplot(1, 3, 3)
-            plt.plot(node_counts, max_error_lagrange, 'b-o', label=f'Lagrange ({method})')
-            plt.plot(node_counts, max_error_spline, 'g-s', label=f'Spline ({method})')
-            plt.xlabel('Liczba węzłów')
-            plt.ylabel('Błąd maksymalny [m]')
-            plt.title('Maksymalny błąd bezwzględny')
-            plt.yscale('log')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-
-        plt.suptitle(f'Analiza błędów interpolacji - {route_name}', fontsize=14)
+        plt.suptitle(f'Analiza błędu interpolacji - {route_name}', fontsize=14)
         plt.tight_layout()
 
         if save_fig:
             plt.savefig(f'error_analysis_{route_name}.png', dpi=300, bbox_inches='tight')
 
-        plt.show()
 
     def generate_summary_report(self) -> str:
         report = ["=" * 60, "PODSUMOWANIE ANALIZY INTERPOLACJI PROFILÓW WYSOKOŚCIOWYCH", "=" * 60]
@@ -361,11 +345,16 @@ class ElevationProfileInterpolator:
 
         data = self.data[route_name]
         results = self.results[route_name]['analyses'][method]
-        
-        # Helper for plotting
+
+        y_min, y_max = min(data['elevation']), max(data['elevation'])
+        y_margin = (y_max - y_min) * 0.1
+        y_min_zoom = y_min - y_margin
+        y_max_zoom = y_max + y_margin
+
         def plot_figure(interpolation_type: str):
             fig, axs = plt.subplots(2, 2, figsize=(16, 10))
             axs = axs.flatten()
+
             for idx, n_nodes in enumerate(node_counts):
                 if n_nodes not in results:
                     axs[idx].set_title(f"Brak danych dla {n_nodes} węzłów")
@@ -390,17 +379,41 @@ class ElevationProfileInterpolator:
                 axs[idx].grid(True)
                 axs[idx].set_xlabel("Dystans [m]")
                 axs[idx].set_ylabel("Wysokość [m]")
+                axs[idx].set_ylim(y_min_zoom, y_max_zoom)
 
             fig.tight_layout()
+            
             if save_dir:
                 os.makedirs(save_dir, exist_ok=True)
                 filename = f"{route_name}_{method}_{interpolation_type}.png"
                 fig.savefig(os.path.join(save_dir, filename), dpi=300)
-            else:
-                plt.show()
+                plt.close()
 
         plot_figure('lagrange')
         plot_figure('spline')
+        
+    def plot_raw(self, route_name: str, save_dir: str = None):
+        if route_name not in self.data:
+            print(f"Brak danych dla trasy: {route_name}")
+            return
+            
+        data = self.data[route_name]
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(data['distance'], data['elevation'], 'k-', linewidth=1.2, label='Oryginalne dane')
+        plt.title(f"Surowy profil wysokościowy - {route_name}")
+        plt.xlabel("Dystans [m]")
+        plt.ylabel("Wysokość [m]")
+        plt.grid(True)
+        plt.legend()
+
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+            filename = f"{route_name}_raw.png"
+            plt.savefig(os.path.join(save_dir, filename), dpi=300)
+            plt.close()
+        else:
+            plt.show()
 
 
 if __name__ == "__main__":
@@ -425,13 +438,21 @@ if __name__ == "__main__":
     print(f"\nRozpoczynanie analizy dla tras: {loaded_routes}")
 
     for route_name in loaded_routes:
+        print(f"\nTworzę wykres danych surowych {route_name}");
+        interpolator.plot_raw(route_name, save_dir="assets");
+        
         print(f"\nAnalizuję trasę: {route_name}")
         results = interpolator.analyze_route(route_name, node_counts, methods)
         
         print(f"\nTworzę wykresy trasy: {route_name}")
+        
         for method in methods:
             interpolator.plot_interpolation_comparison_multi(route_name, node_counts, method, save_dir="assets")
 
+        interpolator.plot_interpolation_all_methods_comparison(route_name, node_counts, save_dir="assets")
+        interpolator.plot_error_analysis(route_name, methods, save_fig = True)
+            
+        
     print("\n" + interpolator.generate_summary_report())
 
     print("\nAnaliza zakończona. Sprawdź wygenerowane wykresy powyżej.")
