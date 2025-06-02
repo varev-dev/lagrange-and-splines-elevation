@@ -86,9 +86,49 @@ class ElevationProfileInterpolator:
 
 
     def cubic_spline_interpolation(self, x_nodes: np.ndarray, y_nodes: np.ndarray, x_eval: np.ndarray) -> np.ndarray:
-        cs = CubicSpline(x_nodes, y_nodes, bc_type='natural')
-        y_eval = cs(x_eval)
+        n = len(x_nodes)
+        if n < 2:
+            raise ValueError("Potrzeba co najmniej 2 punktów do interpolacji")
+        
+        h = np.diff(x_nodes)
+        
+        A = np.zeros((n, n))
+        b = np.zeros(n)
 
+        A[0, 0] = 1.0
+        A[n-1, n-1] = 1.0
+        b[0] = 0.0
+        b[n-1] = 0.0
+        
+        for i in range(1, n-1):
+            A[i, i-1] = h[i-1]
+            A[i, i] = 2.0 * (h[i-1] + h[i])
+            A[i, i+1] = h[i]
+            b[i] = 6.0 * ((y_nodes[i+1] - y_nodes[i])/h[i] - (y_nodes[i] - y_nodes[i-1])/h[i-1])
+        
+        M = np.linalg.solve(A, b)
+        
+
+        coeffs = []
+        for i in range(n-1):
+            ai = y_nodes[i]
+            bi = (y_nodes[i+1] - y_nodes[i])/h[i] - h[i]*(2*M[i] + M[i+1])/6.0
+            ci = M[i]/2.0
+            di = (M[i+1] - M[i])/(6.0*h[i])
+            
+            coeffs.append((ai, bi, ci, di))
+        
+        y_eval = np.zeros_like(x_eval)
+        
+        for j, x in enumerate(x_eval):
+
+            i = np.searchsorted(x_nodes[1:], x)
+            i = min(i, n-2)
+    
+            dx = x - x_nodes[i]
+            ai, bi, ci, di = coeffs[i]
+            y_eval[j] = ai + bi*dx + ci*dx**2 + di*dx**3
+        
         return y_eval
 
     def select_nodes(self, distance: np.ndarray, elevation: np.ndarray, n_nodes: int, method: str = 'uniform') -> Tuple[np.ndarray, np.ndarray]:
