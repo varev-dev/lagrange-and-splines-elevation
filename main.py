@@ -210,7 +210,6 @@ class ElevationProfileInterpolator:
         data = self.data[route_name]
         available_methods = self.results[route_name]['analyses'].keys()
 
-        # Zakres Y oparty na danych oryginalnych z lekkim marginesem
         y_min = data['elevation'].min()
         y_max = data['elevation'].max()
         y_range = y_max - y_min
@@ -283,8 +282,8 @@ class ElevationProfileInterpolator:
                 rmse_spline.append(result['errors_spline']['RMSE'])
 
             # RMSE
-            plt.plot(node_counts, rmse_lagrange, 'b-o', label=f'Lagrange ({method})')
-            plt.plot(node_counts, rmse_spline, 'g-s', label=f'Spline ({method})')
+            plt.plot(node_counts, rmse_lagrange, '-o', label=f'Lagrange ({method})')
+            plt.plot(node_counts, rmse_spline, '-s', label=f'Spline ({method})')
             plt.xlabel('Liczba węzłów')
             plt.ylabel('RMSE [m]')
             plt.title('Root Mean Square Error')
@@ -412,9 +411,6 @@ class ElevationProfileInterpolator:
             filename = f"{route_name}_raw.png"
             plt.savefig(os.path.join(save_dir, filename), dpi=300)
             plt.close()
-        else:
-            plt.show()
-
 
 if __name__ == "__main__":
     interpolator = ElevationProfileInterpolator()
